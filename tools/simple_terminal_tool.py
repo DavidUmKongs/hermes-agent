@@ -196,7 +196,7 @@ def _execute_ssh_command(instance, command: str, timeout: Optional[int] = None) 
         if ssh_context_manager:
             try:
                 ssh_context_manager.__exit__(None, None, None)
-            except:
+            except Exception:
                 pass
 
         return {
@@ -210,7 +210,7 @@ def _execute_ssh_command(instance, command: str, timeout: Optional[int] = None) 
         if ssh_context_manager:
             try:
                 ssh_context_manager.__exit__(None, None, None)
-            except:
+            except Exception:
                 pass
 
         # Check if it's a timeout

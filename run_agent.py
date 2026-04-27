@@ -46,7 +46,7 @@ from model_tools import get_tool_definitions, handle_function_call, check_toolse
 from tools.terminal_tool import cleanup_vm
 
 # Import profiling
-from profiling import get_profiler
+from profiling import get_profiler, reset_profiler
 
 
 class AIAgent:
@@ -368,8 +368,7 @@ class AIAgent:
             Dict: Complete conversation result with final response and message history
         """
         # Reset profiler for this conversation to get fresh stats
-        from profiling import reset_profiler as reset_prof
-        reset_prof()
+        reset_profiler()
 
         # Generate unique task_id if not provided to isolate VMs between concurrent tasks
         import uuid
@@ -461,11 +460,6 @@ class AIAgent:
                     if self.verbose_logging:
                         for tc in assistant_message.tool_calls:
                             logging.debug(f"Tool call: {tc.function.name} with args: {tc.function.arguments[:200]}...")
-                            # Debug: Check what attributes are available on tool_call
-                            logging.debug(f"Tool call attributes: {dir(tc)}")
-                            # Try to dump the model to see all fields
-                            if hasattr(tc, 'model_dump'):
-                                logging.debug(f"Tool call data: {tc.model_dump()}")
                     
                     # Add assistant message with tool calls to conversation
                     # Extract thought_signature if present (required for Gemini models)

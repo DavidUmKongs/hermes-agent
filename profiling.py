@@ -260,63 +260,67 @@ def aggregate_profiling_stats(stats_list: List[Dict]) -> Dict:
     Returns:
         Dict: Aggregated statistics with combined tool and API call data
     """
-    aggregated = {
-        "tools": defaultdict(lambda: {"times": []}),
-        "api_calls": {"times": []}
-    }
+    # Note: per-call timings are not preserved across worker boundaries, so we
+    # combine the per-conversation summary stats directly. This gives correct
+    # call_count/total_time/min/max/mean. ``median`` cannot be reconstructed
+    # exactly from summaries; we surface mean as a best-effort approximation
+    # and flag it via the ``median_time_approximate`` field.
 
-    # Aggregate tool statistics
-    for stats in stats_list:
-        # Aggregate tool timings
-        for tool_name, tool_stats in stats.get("tools", {}).items():
-            # Reconstruct individual timings from aggregated stats
-            # Since we have mean_time and call_count, we approximate
-            aggregated["tools"][tool_name]["times"].extend(
-                [tool_stats.get("mean_time", 0.0)] * tool_stats.get("call_count", 0)
-            )
-
-        # Aggregate API call timings
-        api_stats = stats.get("api_calls", {})
-        if api_stats.get("call_count", 0) > 0:
-            aggregated["api_calls"]["times"].extend(
-                [api_stats.get("mean_time", 0.0)] * api_stats.get("call_count", 0)
-            )
-
-    # Calculate final statistics for tools
-    final_stats = {"tools": {}, "api_calls": {}}
-
-    for tool_name, data in aggregated["tools"].items():
-        times = data["times"]
-        if times:
-            final_stats["tools"][tool_name] = {
-                "call_count": len(times),
-                "total_time": sum(times),
-                "min_time": min(times),
-                "max_time": max(times),
-                "mean_time": statistics.mean(times),
-                "median_time": statistics.median(times)
-            }
-
-    # Calculate final statistics for API calls
-    api_times = aggregated["api_calls"]["times"]
-    if api_times:
-        final_stats["api_calls"] = {
-            "call_count": len(api_times),
-            "total_time": sum(api_times),
-            "min_time": min(api_times),
-            "max_time": max(api_times),
-            "mean_time": statistics.mean(api_times),
-            "median_time": statistics.median(api_times)
-        }
-    else:
-        final_stats["api_calls"] = {
+    def _empty():
+        return {
             "call_count": 0,
             "total_time": 0.0,
-            "min_time": 0.0,
+            "min_time": float("inf"),
             "max_time": 0.0,
-            "mean_time": 0.0,
-            "median_time": 0.0
         }
+
+    tool_acc: Dict[str, Dict] = defaultdict(_empty)
+    api_acc = _empty()
+
+    def _merge(acc: Dict, summary: Dict) -> None:
+        count = summary.get("call_count", 0)
+        if count <= 0:
+            return
+        acc["call_count"] += count
+        acc["total_time"] += summary.get("total_time", 0.0)
+        # Only consider min/max if the source actually had calls; otherwise
+        # its min_time will be the sentinel 0.0 from to_dict().
+        acc["min_time"] = min(acc["min_time"], summary.get("min_time", float("inf")))
+        acc["max_time"] = max(acc["max_time"], summary.get("max_time", 0.0))
+
+    for stats in stats_list:
+        for tool_name, tool_stats in stats.get("tools", {}).items():
+            _merge(tool_acc[tool_name], tool_stats)
+        _merge(api_acc, stats.get("api_calls", {}))
+
+    def _finalize(acc: Dict) -> Dict:
+        count = acc["call_count"]
+        if count == 0:
+            return {
+                "call_count": 0,
+                "total_time": 0.0,
+                "min_time": 0.0,
+                "max_time": 0.0,
+                "mean_time": 0.0,
+                "median_time": 0.0,
+                "median_time_approximate": True,
+            }
+        mean_time = acc["total_time"] / count
+        return {
+            "call_count": count,
+            "total_time": acc["total_time"],
+            "min_time": acc["min_time"] if acc["min_time"] != float("inf") else 0.0,
+            "max_time": acc["max_time"],
+            "mean_time": mean_time,
+            # Real median requires per-call data we don't carry across workers.
+            "median_time": mean_time,
+            "median_time_approximate": True,
+        }
+
+    final_stats = {
+        "tools": {name: _finalize(acc) for name, acc in tool_acc.items()},
+        "api_calls": _finalize(api_acc),
+    }
 
     return final_stats
 

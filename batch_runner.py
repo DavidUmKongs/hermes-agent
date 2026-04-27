@@ -35,7 +35,6 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from multiprocessing import Pool, Manager, Lock
 import traceback
-import re
 
 import fire
 
@@ -187,9 +186,9 @@ def _extract_tool_errors_from_messages(messages: List[Dict[str, Any]]) -> List[D
                             if not error_msg:
                                 error_msg = str(content_json.get("message", content_json.get("error", "Unknown error")))
 
-            except:
+            except (json.JSONDecodeError, TypeError, AttributeError):
                 # If not JSON, check if content explicitly states an error
-                if content.strip().lower().startswith("error:"):
+                if isinstance(content, str) and content.strip().lower().startswith("error:"):
                     has_error = True
                     error_msg = content.strip()
 
@@ -275,13 +274,13 @@ def _extract_tool_stats(messages: List[Dict[str, Any]]) -> Dict[str, Dict[str, i
                         if content_json.get("success") is False:
                             is_success = False
 
-            except:
+            except (json.JSONDecodeError, TypeError, AttributeError):
                 # If not JSON, check if content is empty or explicitly states an error
                 # Note: We avoid simple substring matching to prevent false positives
                 if not content:
                     is_success = False
                 # Only mark as failure if it explicitly starts with "Error:" or "ERROR:"
-                elif content.strip().lower().startswith("error:"):
+                elif isinstance(content, str) and content.strip().lower().startswith("error:"):
                     is_success = False
             
             # Update success/failure count
